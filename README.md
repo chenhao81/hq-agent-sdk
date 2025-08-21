@@ -1,0 +1,228 @@
+# HQ Agent SDK
+
+一个简洁而强大的Python SDK，专为LLM会话管理和工具调用而设计。HQ Agent SDK封装了OpenAI客户端，提供流式和非流式的LLM交互功能，支持函数工具调用和自动的工具执行循环。
+
+## 🚀 特性
+
+- **智能会话管理**: 完整的LLM会话生命周期管理
+- **工具调用支持**: 自动执行工具调用，支持多轮对话
+- **流式响应**: 支持流式和非流式两种调用模式
+- **类型安全**: 完整的Python类型注解支持
+- **Schema自动转换**: 自动将Python函数转换为OpenAI工具调用格式
+- **消息历史**: 自动管理用户、助手、系统和工具消息历史
+
+## 📦 安装
+
+```bash
+pip install -e .
+```
+
+### 依赖要求
+
+- Python >= 3.8
+- openai
+- typing_extensions
+
+## 🛠️ 快速开始
+
+### 基本使用
+
+```python
+from openai import OpenAI
+from hq_agent_sdk import LLMSession, AgentConfig
+
+# 创建OpenAI客户端
+client = OpenAI(api_key="your-api-key")
+
+# 配置Agent
+config = AgentConfig(
+    model="gpt-4",
+    temperature=0.7,
+    max_iterations=5
+)
+
+# 创建会话
+session = LLMSession(client=client, config=config, stream=False)
+
+# 发送消息
+response = session.call("你好，请帮我写一个Python函数")
+print(response.message.content)
+```
+
+### 工具调用示例
+
+```python
+from openai import OpenAI
+from hq_agent_sdk import LLMSession, AgentConfig, function_to_tool_schema
+
+# 定义工具函数
+def get_weather(city: str) -> str:
+    """获取指定城市的天气信息
+    
+    :param city: 城市名称
+    :return: 天气描述
+    """
+    return f"{city}的天气是晴天，气温25°C"
+
+# 创建OpenAI客户端
+client = OpenAI(api_key="your-api-key")
+
+# 配置和创建会话
+config = AgentConfig(model="gpt-4")
+session = LLMSession(
+    client=client, 
+    tools=[get_weather],  # 直接传入工具函数列表
+    config=config, 
+    stream=False
+)
+
+# 发送需要工具调用的消息
+response = session.call("北京今天天气怎么样？")
+print(response.message.content)
+```
+
+### 流式响应
+
+```python
+from openai import OpenAI
+from hq_agent_sdk import LLMSession, AgentConfig
+
+# 创建OpenAI客户端
+client = OpenAI(api_key="your-api-key")
+
+# 配置
+config = AgentConfig(model="gpt-4")
+session = LLMSession(client=client, config=config, stream=True)  # 启用流式响应
+
+# 流式获取响应
+for delta in session.call("请写一首关于AI的诗"):
+    if hasattr(delta, 'content') and delta.content:
+        print(delta.content, end="", flush=True)
+```
+
+## 📚 核心组件
+
+### LLMSession
+
+主要的会话管理类，负责：
+- LLM调用的封装
+- 消息历史管理
+- 工具调用的自动执行
+- 流式和非流式响应处理
+
+### AgentConfig
+
+配置类，包含：
+- `model`: 使用的模型名称（默认："gpt-oss:20b"）
+- `temperature`: 温度参数（默认：0.1）
+- `max_iterations`: 最大迭代次数（默认：5）
+- `max_tokens`: 最大Token数（可选）
+- `timeout`: 超时时间（默认：30.0秒）
+
+### 工具Schema转换
+
+- `function_to_tool_schema()`: 将Python函数转换为OpenAI工具调用格式
+- `python_type_to_schema()`: Python类型到JSON Schema的映射
+- 支持复杂类型：Union、Optional、Literal、泛型容器等
+
+## 🔧 高级功能
+
+### 自定义工具
+
+```python
+from typing import Union, Optional
+
+def calculate(expression: str, precision: Optional[int] = 2) -> Union[float, str]:
+    """计算数学表达式
+    
+    :param expression: 数学表达式字符串
+    :param precision: 计算精度，默认2位小数
+    :return: 计算结果或错误信息
+    """
+    try:
+        result = eval(expression)
+        return round(result, precision)
+    except:
+        return "计算错误"
+
+# 自动生成工具Schema
+tool_schema = function_to_tool_schema(calculate)
+```
+
+### 消息历史管理
+
+```python
+# 获取消息历史
+history = session.messages
+
+# 清空历史
+session.clear_messages()
+
+# 添加系统消息
+session.add_system_message("你是一个专业的Python开发助手")
+
+# 添加用户消息
+session.add_user_message("请帮我解释这段代码")
+```
+
+## 🏗️ 架构说明
+
+```
+hq_agent_sdk/
+├── __init__.py              # 包入口，导出主要类和函数
+├── llm_session.py           # 核心会话管理类
+└── function_to_tool_schema.py  # 工具Schema转换模块
+```
+
+### 工具调用流程
+
+1. 用户消息 → LLM推理
+2. 如果有工具调用：执行工具 → 添加工具结果到消息历史 → 继续下一轮
+3. 如果无工具调用：结束对话
+
+## 🤝 开发指南
+
+### 本地开发
+
+```bash
+# 克隆项目
+git clone <your-repo-url>
+cd hq-agent-sdk
+
+# 安装开发依赖
+pip install -e .
+
+# 运行示例
+python hq_agent_sdk/function_to_tool_schema.py
+```
+
+### 构建和分发
+
+```bash
+# 构建包
+python setup.py sdist bdist_wheel
+
+# 清理构建文件
+rm -rf build/ dist/ *.egg-info/
+```
+
+## 📝 版本历史
+
+### v0.0.1
+- 初始版本发布
+- 基础LLM会话管理功能
+- 工具调用支持
+- Schema自动转换
+
+## 📄 许可证
+
+MIT License
+
+## 🔗 相关链接
+
+- [OpenAI API 文档](https://platform.openai.com/docs)
+- [JSON Schema 规范](https://json-schema.org/)
+
+---
+
+**HQ Agent SDK** - 让LLM工具调用变得简单而强大！
