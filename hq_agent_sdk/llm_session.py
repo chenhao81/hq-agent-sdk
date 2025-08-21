@@ -4,8 +4,8 @@ from typing import Dict, List, Callable, Optional, Any, Generator, Union
 from dataclasses import dataclass
 from .function_to_tool_schema import function_to_tool_schema
 from .llm_client import BaseLLMClient
-from .middleware import MiddlewareManager, TodosMiddleware
-
+from .middleware import MiddlewareManager
+from .tools.todos import TodosMiddleware
 
 @dataclass
 class AgentConfig:

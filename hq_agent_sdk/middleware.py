@@ -39,22 +39,6 @@ class ToolMiddleware(ABC):
         """
         return result
 
-
-class TodosMiddleware(ToolMiddleware):
-    """Todos工具专用中间件，自动注入session_id"""
-    
-    def before_tool_call(self, tool_name: str, args: Dict[str, Any], session) -> Dict[str, Any]:
-        """为todos相关工具自动注入session_id"""
-        if tool_name in ['create_todos', 'update_todos', 'query_todos']:
-            # 自动注入session_id
-            args = args.copy()  # 避免修改原始参数
-            args['session_id'] = session.session_id
-        return args
-    
-    def after_tool_call(self, result: Any, tool_name: str, session) -> Any:
-        return result
-
-
 class MiddlewareManager:
     """中间件管理器"""
     

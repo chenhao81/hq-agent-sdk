@@ -120,7 +120,8 @@ class OllamaClient(BaseLLMClient):
                 for tc in msg["tool_calls"]:
                     tool_calls_text += f"调用工具: {tc['function']['name']}\n"
                     tool_calls_text += f"参数: {tc['function']['arguments']}\n"
-                ollama_msg["content"] = (msg.get("content", "") + "\n" + tool_calls_text).strip()
+                content = msg.get("content") or ""
+                ollama_msg["content"] = (content + "\n" + tool_calls_text).strip()
             
             # 处理工具结果消息
             elif msg["role"] == "tool":
