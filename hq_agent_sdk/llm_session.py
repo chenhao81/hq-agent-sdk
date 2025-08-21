@@ -1,8 +1,10 @@
 import json
+import uuid
 from typing import Dict, List, Callable, Optional, Any, Generator, Union
 from dataclasses import dataclass
 from .function_to_tool_schema import function_to_tool_schema
 from .llm_client import BaseLLMClient
+from .middleware import MiddlewareManager, TodosMiddleware
 
 
 @dataclass
@@ -32,7 +34,8 @@ class LLMSession:
         tools: List[Callable] = None,
         config: AgentConfig = None,
         stream: bool = True,
-        system_prompt: str = "你是一个AI助手"
+        system_prompt: str = "你是一个AI助手",
+        auto_add_todos_middleware: bool = True
     ):
         """
         初始化 LLMSession
@@ -43,11 +46,20 @@ class LLMSession:
             config: 配置参数
             stream: 是否使用流式输出
             system_prompt: 系统提示词
+            auto_add_todos_middleware: 是否自动添加todos中间件
         """
         self.client = client
         self.config = config or AgentConfig()
         self.stream = stream
         self.system_prompt = system_prompt
+        
+        # 生成唯一的session_id
+        self.session_id = str(uuid.uuid4())
+        
+        # 初始化中间件管理器
+        self.middleware_manager = MiddlewareManager()
+        if auto_add_todos_middleware:
+            self.middleware_manager.add_middleware(TodosMiddleware())
         
         # 初始化消息历史
         self.messages = [{"role": "system", "content": system_prompt}]
@@ -102,8 +114,20 @@ class LLMSession:
             function_args = json.loads(tool_call.function.arguments)
             
             if function_name in self.tool_functions:
-                result = self.tool_functions[function_name](**function_args)
-                return str(result)
+                # 通过中间件处理参数
+                processed_args = self.middleware_manager.process_before_tool_call(
+                    function_name, function_args, self
+                )
+                
+                # 执行工具函数
+                result = self.tool_functions[function_name](**processed_args)
+                
+                # 通过中间件处理结果
+                processed_result = self.middleware_manager.process_after_tool_call(
+                    result, function_name, self
+                )
+                
+                return str(processed_result)
             else:
                 return f"错误: 未找到工具函数 {function_name}"
                 

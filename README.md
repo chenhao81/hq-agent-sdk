@@ -4,9 +4,12 @@
 
 ## 🚀 特性
 
-- **智能会话管理**: 完整的LLM会话生命周期管理
+- **智能会话管理**: 完整的LLM会话生命周期管理，自动生成唯一session_id
 - **工具调用支持**: 自动执行工具调用，支持多轮对话
 - **流式响应**: 支持流式和非流式两种调用模式
+- **多LLM提供商**: 统一接口支持OpenAI、Ollama等多种LLM提供商
+- **中间件系统**: 专业的中间件架构，支持工具调用的前置和后置处理
+- **内置Todos工具**: 提供任务管理功能，支持任务创建、更新和查询
 - **类型安全**: 完整的Python类型注解支持
 - **Schema自动转换**: 自动将Python函数转换为OpenAI工具调用格式
 - **消息历史**: 自动管理用户、助手、系统和工具消息历史
@@ -22,6 +25,7 @@ pip install -e .
 - Python >= 3.8
 - openai
 - typing_extensions
+- ollama（可选，用于本地LLM支持）
 
 ## 🛠️ 快速开始
 
@@ -100,6 +104,59 @@ for delta in session.call("请写一首关于AI的诗"):
         print(delta.content, end="", flush=True)
 ```
 
+### 内置Todos工具
+
+```python
+from hq_agent_sdk import LLMSession, OpenAIClient, create_todos, update_todos, query_todos
+
+# 创建会话，自动包含todos中间件
+session = LLMSession(
+    client=OpenAIClient(api_key="your-key"),
+    tools=[create_todos, update_todos, query_todos]  
+)
+
+# LLM可以直接调用todos工具，无需提供session_id
+# 例如LLM调用：create_todos(["实现用户登录", "编写单元测试", "部署到生产环境"])
+# 中间件会自动注入session_id参数
+```
+
+### 多LLM提供商支持
+
+```python
+from hq_agent_sdk import LLMSession, OpenAIClient, OllamaClient
+
+# 使用OpenAI
+openai_session = LLMSession(
+    client=OpenAIClient(api_key="your-key", base_url="https://api.openai.com/v1"),
+    tools=[your_tools]
+)
+
+# 使用Ollama本地LLM
+ollama_session = LLMSession(
+    client=OllamaClient(base_url="http://localhost:11434"),
+    tools=[your_tools]
+)
+```
+
+### 自定义中间件
+
+```python
+from hq_agent_sdk import ToolMiddleware, LLMSession
+
+class LoggingMiddleware(ToolMiddleware):
+    def before_tool_call(self, tool_name: str, args: dict, session) -> dict:
+        print(f"调用工具: {tool_name}, 参数: {args}")
+        return args
+    
+    def after_tool_call(self, result, tool_name: str, session):
+        print(f"工具 {tool_name} 执行完成，结果: {result}")
+        return result
+
+# 添加自定义中间件
+session = LLMSession(client=client, auto_add_todos_middleware=False)
+session.middleware_manager.add_middleware(LoggingMiddleware())
+```
+
 ## 📚 核心组件
 
 ### LLMSession
@@ -171,7 +228,11 @@ session.add_user_message("请帮我解释这段代码")
 hq_agent_sdk/
 ├── __init__.py              # 包入口，导出主要类和函数
 ├── llm_session.py           # 核心会话管理类
-└── function_to_tool_schema.py  # 工具Schema转换模块
+├── llm_client.py            # LLM客户端抽象层
+├── middleware.py            # 中间件系统
+├── function_to_tool_schema.py  # 工具Schema转换模块
+└── tools/
+    └── todos.py             # 内置todos任务管理工具
 ```
 
 ### 工具调用流程
@@ -207,6 +268,13 @@ rm -rf build/ dist/ *.egg-info/
 ```
 
 ## 📝 版本历史
+
+### v0.0.2
+- **新增多LLM提供商支持**: OpenAI、Ollama统一接口
+- **中间件系统**: 专业的中间件架构，支持工具调用前置和后置处理
+- **内置Todos工具**: 提供完整的任务管理功能，支持会话级别的任务隔离
+- **会话管理增强**: 自动生成唯一session_id，支持多会话并发
+- **架构重构**: 清晰的分层设计，更好的代码组织
 
 ### v0.0.1
 - 初始版本发布
