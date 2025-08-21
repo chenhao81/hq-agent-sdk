@@ -9,6 +9,7 @@ setup(
     install_requires=[
         "openai",
         "typing_extensions",
+        "ollama",
     ],
     python_requires=">=3.8",
     classifiers=[

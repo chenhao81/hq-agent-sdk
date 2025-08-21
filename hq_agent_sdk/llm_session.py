@@ -1,8 +1,8 @@
 import json
-from openai import OpenAI
 from typing import Dict, List, Callable, Optional, Any, Generator, Union
 from dataclasses import dataclass
 from .function_to_tool_schema import function_to_tool_schema
+from .llm_client import BaseLLMClient
 
 
 @dataclass
@@ -28,7 +28,7 @@ class LLMSession:
     
     def __init__(
         self,
-        client: OpenAI,
+        client: BaseLLMClient,
         tools: List[Callable] = None,
         config: AgentConfig = None,
         stream: bool = True,
@@ -38,7 +38,7 @@ class LLMSession:
         初始化 LLMSession
         
         Args:
-            client: OpenAI客户端对象
+            client: LLM客户端对象（支持OpenAI或Ollama）
             tools: 工具函数列表
             config: 配置参数
             stream: 是否使用流式输出
@@ -68,9 +68,24 @@ class LLMSession:
             # 构建函数映射
             self.tool_functions[tool_func.__name__] = tool_func
     
-    def add_user_message(self, content: str):
-        """添加用户消息"""
-        self.messages.append({"role": "user", "content": content})
+    def add_user_message(self, content: Union[str, List[Dict]]):
+        """
+        添加用户消息
+        
+        Args:
+            content: 消息内容，可以是文本字符串或多模态内容列表
+                    文本: "hello world"
+                    多模态: [
+                        {"type": "text", "text": "描述这张图片"},
+                        {"type": "image", "image_path": "path/to/image.jpg"}
+                    ]
+        """
+        if isinstance(content, str):
+            # 纯文本消息
+            self.messages.append({"role": "user", "content": content})
+        else:
+            # 多模态消息
+            self.messages.append({"role": "user", "content": content})
     
     def add_system_message(self, content: str):
         """添加系统消息"""
@@ -182,7 +197,7 @@ class LLMSession:
         
         return True
     
-    def call(self, user_message: str = None) -> Union[Generator[Any, None, None], Any]:
+    def call(self, user_message: Union[str, List[Dict]] = None) -> Union[Generator[Any, None, None], Any]:
         """
         调用LLM，支持工具调用的完整流程
         
@@ -209,7 +224,7 @@ class LLMSession:
             iteration += 1
             
             # 创建流式请求
-            stream_response = self.client.chat.completions.create(
+            stream_response = self.client.create_chat_completion(
                 model=self.config.model,
                 messages=self.messages,
                 tools=self.tools_description if self.tools_description else None,
@@ -250,7 +265,7 @@ class LLMSession:
             iteration += 1
             
             # 创建非流式请求
-            response = self.client.chat.completions.create(
+            response = self.client.create_chat_completion(
                 model=self.config.model,
                 messages=self.messages,
                 tools=self.tools_description if self.tools_description else None,
