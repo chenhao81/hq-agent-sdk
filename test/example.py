@@ -74,6 +74,7 @@ def demo_default_runner():
         system_prompt="你是一个helpful的AI助手。",
         before_tool_calling=[tools_before_hook],
         after_tool_calling=[tools_after_hook],
+        enable_logging=True,
     )
     
     # 使用默认Runner

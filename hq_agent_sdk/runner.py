@@ -45,6 +45,8 @@ class BaseRunner(ABC):
         Args:
             user_message: 用户消息
         """
+        response_content = ""
+
         # 重置状态
         self.on_stream_start()
         
@@ -59,6 +61,7 @@ class BaseRunner(ABC):
             # 处理 content (回答内容)
             if hasattr(delta, 'content') and delta.content is not None and len(delta.content) > 0:
                 self.on_content_delta(delta.content)
+                response_content += delta.content
             
             # 处理 tool_calls
             if hasattr(delta, 'tool_calls') and delta.tool_calls is not None:
@@ -67,6 +70,8 @@ class BaseRunner(ABC):
         
         # 完成处理
         self.on_stream_end()
+
+        return response_content
     
     def _run_non_streaming(self, user_message: Union[str, list] = None) -> Any:
         """
@@ -176,6 +181,8 @@ class DefaultRunner(BaseRunner):
             self.stage = 'content'        
 
         if hasattr(tool_call_delta, 'function') and tool_call_delta.function:
+            if hasattr(tool_call_delta.function, 'name') and tool_call_delta.function.name:
+                print(tool_call_delta.function.name, end="", flush=True)
             if hasattr(tool_call_delta.function, 'arguments') and tool_call_delta.function.arguments:
                 print(tool_call_delta.function.arguments, end="", flush=True)
     

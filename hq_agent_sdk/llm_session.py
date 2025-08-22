@@ -1,6 +1,9 @@
 import json
 import uuid
 import re
+import os
+import logging
+from datetime import datetime
 from typing import Dict, List, Callable, Optional, Any, Generator, Union, Tuple
 from dataclasses import dataclass
 
@@ -15,7 +18,7 @@ from .llm_client import BaseLLMClient
 class AgentConfig:
     """Agent配置类"""
     model: str = "gpt-oss:20b"
-    max_iterations: int = 5
+    max_iterations: int = 100
     temperature: float = 0.1
     max_tokens: Optional[int] = None
     timeout: float = 30.0
@@ -41,7 +44,8 @@ class LLMSession:
         stream: bool = True,
         system_prompt: str = "你是一个AI助手",
         before_tool_calling: List[Callable] = None,
-        after_tool_calling: List[Callable] = None
+        after_tool_calling: List[Callable] = None,
+        enable_logging: bool = True
     ):
         """
         初始化 LLMSession
@@ -54,6 +58,7 @@ class LLMSession:
             system_prompt: 系统提示词
             before_tool_calling: 工具调用前执行的函数列表
             after_tool_calling: 工具调用后执行的函数列表
+            enable_logging: 是否启用日志记录
         """
         self.client = client
         self.config = config or AgentConfig()
@@ -62,6 +67,12 @@ class LLMSession:
 
         # 生成唯一的session_id
         self.session_id = str(uuid.uuid4())
+        
+        # 初始化日志功能
+        self.enable_logging = enable_logging
+        self.logger = None
+        if self.enable_logging:
+            self._setup_logger()
         
         # 初始化前置和后置函数列表
         self.before_tool_calling = before_tool_calling or []
@@ -88,6 +99,65 @@ class LLMSession:
             
             # 构建函数映射
             self.tool_functions[tool_func.__name__] = tool_func
+    
+    def _setup_logger(self):
+        """设置日志记录器"""
+        # 创建专用的logger
+        self.logger = logging.getLogger(f"llm_session_{self.session_id}")
+        self.logger.setLevel(logging.INFO)
+        
+        # 如果已经有handler，不重复添加
+        if self.logger.handlers:
+            return
+        
+        # 创建文件处理器
+        log_file = "session.log"
+        file_handler = logging.FileHandler(log_file, encoding='utf-8')
+        file_handler.setLevel(logging.INFO)
+        
+        # 创建格式化器
+        formatter = logging.Formatter(
+            '%(asctime)s [%(name)s] %(levelname)s: %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        file_handler.setFormatter(formatter)
+        
+        # 添加处理器
+        self.logger.addHandler(file_handler)
+    
+    def _log_response_data(self, response_data: Dict):
+        """记录响应数据到日志文件"""
+        if not self.logger:
+            return
+        
+        # 记录基本信息
+        self.logger.info("=== LLM Response ===")
+        
+        # 记录reasoning
+        if response_data.get('reasoning'):
+            self.logger.info(f"Reasoning: {response_data['reasoning']}")
+        
+        # 记录content
+        if response_data.get('content'):
+            self.logger.info(f"Content: {response_data['content']}")
+        
+        # 记录tool_calls
+        if response_data.get('tool_calls'):
+            self.logger.info("Tool Calls:")
+            for i, tool_call in enumerate(response_data['tool_calls']):
+                self.logger.info(f"  Tool #{i+1}:")
+                self.logger.info(f"    ID: {tool_call.id}")
+                self.logger.info(f"    Function: {tool_call.function.name}")
+                self.logger.info(f"    Arguments: {tool_call.function.arguments}")
+    
+    def _log_tool_result(self, tool_call: 'ToolCall', result: str):
+        """记录工具调用结果到日志文件"""
+        if not self.logger:
+            return
+        
+        self.logger.info(f"Tool Result for {tool_call.function.name} (ID: {tool_call.id}):")
+        self.logger.info(f"  Result: {result}")
+        self.logger.info("=" * 50)
     
     def add_user_message(self, content: Union[str, List[Dict]]):
         """
@@ -128,15 +198,12 @@ class LLMSession:
         if not content:
             return False, "空内容"
         
-        # 清理markdown标记
-        cleaned_content = self._clean_json_content(content)
-        
         # 尝试用json5解析（如果可用），否则用标准json
         try:
             if json5:
-                json5.loads(cleaned_content)
+                json5.loads(content)
             else:
-                json.loads(cleaned_content)
+                json.loads(content)
             return True, ""
         except Exception as e:
             return False, f"JSON格式错误: {str(e)}"
@@ -161,14 +228,24 @@ class LLMSession:
                 for after_func in self.after_tool_calling:
                     processed_result = after_func(processed_result, function_name, self)
                 
-                return str(processed_result)
+                # 记录工具调用结果到日志
+                result_str = str(processed_result)
+                self._log_tool_result(tool_call, result_str)
+                
+                return result_str
             else:
-                return f"错误: 未找到工具函数 {function_name}"
+                error_msg = f"错误: 未找到工具函数 {function_name}"
+                self._log_tool_result(tool_call, error_msg)
+                return error_msg
                 
         except json.JSONDecodeError as e:
-            return f"错误: 参数解析失败 - {str(e)}"
+            error_msg = f"错误: 参数解析失败 - {str(e)}"
+            self._log_tool_result(tool_call, error_msg)
+            return error_msg
         except Exception as e:
-            return f"错误: 工具执行失败 - {str(e)}"
+            error_msg = f"错误: 工具执行失败 - {str(e)}"
+            self._log_tool_result(tool_call, error_msg)
+            return error_msg
     
     def _parse_streaming_response(self, stream_response) -> Generator[Any, None, Dict]:
         """解析流式响应"""
@@ -294,6 +371,9 @@ class LLMSession:
             # 解析流式响应
             response_data = yield from self._parse_streaming_response(stream_response)
             
+            # 记录响应数据到日志
+            self._log_response_data(response_data)
+            
             # 处理工具调用
             if response_data['tool_calls']:
                 tool_executed = self._handle_tool_calls(
@@ -310,9 +390,16 @@ class LLMSession:
                     # 如果指定了JSON输出格式，验证JSON格式
                     if (self.config.response_format and 
                         self.config.response_format.get('type') == 'json_object'):
+                        # 清理markdown标记
+                        content = self._clean_json_content(content)
+
                         is_valid, error_msg = self._validate_json_response(content)
                         if not is_valid:
                             # JSON格式错误，添加错误信息并继续循环
+                            self.messages.append({
+                                "role": "assistant",
+                                "content": content
+                            })
                             self.messages.append({
                                 "role": "user",
                                 "content": f"输出格式有误，请确保返回有效的JSON格式。错误信息：{error_msg}"
@@ -350,6 +437,13 @@ class LLMSession:
             final_response = response.choices[0]
             message = final_response.message
             
+            # 记录非流式响应数据到日志
+            response_data = {
+                'content': getattr(message, 'content', ''),
+                'reasoning': getattr(message, 'reasoning', ''),
+                'tool_calls': []
+            }
+            
             # 检查是否有工具调用
             if hasattr(message, 'tool_calls') and message.tool_calls:
                 # 转换为自定义ToolCall对象
@@ -361,12 +455,21 @@ class LLMSession:
                     tool_call_obj.function.arguments = tc.function.arguments
                     tool_calls.append(tool_call_obj)
                 
+                # 添加工具调用到响应数据
+                response_data['tool_calls'] = tool_calls
+                
+                # 记录响应数据到日志
+                self._log_response_data(response_data)
+                
                 # 使用统一的工具调用处理逻辑
                 tool_executed = self._handle_tool_calls(tool_calls, message.content)
                 if tool_executed:
                     continue  # 继续下一轮对话
             else:
-                # 没有工具调用，添加最终消息并结束
+                # 没有工具调用，记录响应数据到日志
+                self._log_response_data(response_data)
+                
+                # 添加最终消息并结束
                 self.messages.append({
                     "role": "assistant",
                     "content": message.content
@@ -374,3 +477,27 @@ class LLMSession:
                 break
         
         return final_response
+    
+    def dump_messages(self, file_path: Optional[str] = None) -> str:
+        """
+        将 self.messages 导出到文本文件
+        
+        Args:
+            file_path: 导出文件路径，如果不指定则使用默认路径
+                      默认路径: ~/.hq-agent-sdk/messages/{session_id}.json
+        
+        Returns:
+            实际导出的文件路径
+        """
+        if file_path is None:
+            # 使用默认路径
+            home_dir = os.path.expanduser("~")
+            messages_dir = os.path.join(home_dir, ".hq-agent-sdk", "messages")
+            os.makedirs(messages_dir, exist_ok=True)
+            file_path = os.path.join(messages_dir, f"{self.session_id}.json")
+        
+        # 将消息历史写入文件
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(self.messages, f, ensure_ascii=False, indent=2)
+        
+        return file_path
