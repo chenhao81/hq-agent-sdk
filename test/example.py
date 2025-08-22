@@ -69,11 +69,11 @@ def demo_default_runner():
     session = LLMSession(
         client=client,
         tools=[get_weather, calculate],
-        config=AgentConfig(model="gpt-oss:20b", temperature=0.1),
+        config=AgentConfig(model="gpt-oss:20b", temperature=0.1,response_format={"type": "json_object"}),
         stream=True,
         system_prompt="你是一个helpful的AI助手。",
         before_tool_calling=[tools_before_hook],
-        after_tool_calling=[tools_after_hook]
+        after_tool_calling=[tools_after_hook],
     )
     
     # 使用默认Runner

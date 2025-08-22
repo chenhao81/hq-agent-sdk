@@ -1,7 +1,13 @@
 import json
 import uuid
-from typing import Dict, List, Callable, Optional, Any, Generator, Union
+import re
+from typing import Dict, List, Callable, Optional, Any, Generator, Union, Tuple
 from dataclasses import dataclass
+
+try:
+    import json5
+except ImportError:
+    json5 = None
 from .function_to_tool_schema import function_to_tool_schema
 from .llm_client import BaseLLMClient
 
@@ -13,6 +19,7 @@ class AgentConfig:
     temperature: float = 0.1
     max_tokens: Optional[int] = None
     timeout: float = 30.0
+    response_format: Optional[Dict[str, str]] = None
 
 
 class ToolCall:
@@ -52,7 +59,7 @@ class LLMSession:
         self.config = config or AgentConfig()
         self.stream = stream
         self.system_prompt = system_prompt
-        
+
         # 生成唯一的session_id
         self.session_id = str(uuid.uuid4())
         
@@ -62,6 +69,9 @@ class LLMSession:
         
         # 初始化消息历史
         self.messages = [{"role": "system", "content": system_prompt}]
+        if (self.config.response_format and 
+            self.config.response_format.get('type') == 'json_object'):
+            self.messages += [{"role": "system", "content": "Response in JSON format."}]
         
         # 处理工具函数
         self.tools = tools or []
@@ -105,6 +115,31 @@ class LLMSession:
     def clear_messages(self):
         """清空消息历史，保留系统提示"""
         self.messages = [{"role": "system", "content": self.system_prompt}]
+    
+    def _clean_json_content(self, content: str) -> str:
+        """清理内容中的markdown代码块标记"""
+        # 移除可能的markdown json代码块标记
+        content = re.sub(r'^```json\s*', '', content, flags=re.MULTILINE)
+        content = re.sub(r'^```\s*$', '', content, flags=re.MULTILINE)
+        return content.strip()
+    
+    def _validate_json_response(self, content: str) -> Tuple[bool, str]:
+        """验证JSON格式的响应内容"""
+        if not content:
+            return False, "空内容"
+        
+        # 清理markdown标记
+        cleaned_content = self._clean_json_content(content)
+        
+        # 尝试用json5解析（如果可用），否则用标准json
+        try:
+            if json5:
+                json5.loads(cleaned_content)
+            else:
+                json.loads(cleaned_content)
+            return True, ""
+        except Exception as e:
+            return False, f"JSON格式错误: {str(e)}"
     
     def _execute_tool_call(self, tool_call: ToolCall) -> str:
         """执行工具调用"""
@@ -253,7 +288,7 @@ class LLMSession:
                 tools=self.tools_description if self.tools_description else None,
                 stream=True,
                 temperature=self.config.temperature,
-                max_tokens=self.config.max_tokens
+                max_tokens=self.config.max_tokens,
             )
             
             # 解析流式响应
@@ -270,9 +305,23 @@ class LLMSession:
             else:
                 # 没有工具调用，添加最终的助手消息
                 if response_data['content']:
+                    content = response_data['content']
+
+                    # 如果指定了JSON输出格式，验证JSON格式
+                    if (self.config.response_format and 
+                        self.config.response_format.get('type') == 'json_object'):
+                        is_valid, error_msg = self._validate_json_response(content)
+                        if not is_valid:
+                            # JSON格式错误，添加错误信息并继续循环
+                            self.messages.append({
+                                "role": "user",
+                                "content": f"输出格式有误，请确保返回有效的JSON格式。错误信息：{error_msg}"
+                            })
+                            continue
+                    
                     self.messages.append({
                         "role": "assistant",
-                        "content": response_data['content']
+                        "content": content
                     })
                 break
         
@@ -294,7 +343,8 @@ class LLMSession:
                 tools=self.tools_description if self.tools_description else None,
                 stream=False,
                 temperature=self.config.temperature,
-                max_tokens=self.config.max_tokens
+                max_tokens=self.config.max_tokens,
+                response_format=self.config.response_format
             )
             
             final_response = response.choices[0]
