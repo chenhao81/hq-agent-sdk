@@ -166,24 +166,6 @@ session = LLMSession(
 response = session.call("北京今天天气怎么样？然后帮我计算 15 * 23")
 ```
 
-### 自定义中间件
-
-```python
-from hq_agent_sdk import ToolMiddleware, LLMSession
-
-class LoggingMiddleware(ToolMiddleware):
-    def before_tool_call(self, tool_name: str, args: dict, session) -> dict:
-        print(f"调用工具: {tool_name}, 参数: {args}")
-        return args
-    
-    def after_tool_call(self, result, tool_name: str, session):
-        print(f"工具 {tool_name} 执行完成，结果: {result}")
-        return result
-
-# 添加自定义中间件
-session = LLMSession(client=client, auto_add_todos_middleware=False)
-session.middleware_manager.add_middleware(LoggingMiddleware())
-```
 
 ## 📚 核心组件
 

@@ -16,11 +16,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **会话管理**: 自动生成唯一的 `session_id`，用于标识和隔离不同会话
 - **中间件集成**: 内置中间件管理器，支持工具调用的前置和后置处理
 
-### 中间件系统 (`middleware.py`)
-- `ToolMiddleware`: 抽象基类，定义工具调用中间件接口
-- `TodosMiddleware`: 专用中间件，为todos工具自动注入session_id
-- `MiddlewareManager`: 中间件管理器，支持多个中间件的链式处理
-- **设计优势**: 保持框架核心代码纯净，通过中间件处理特定工具的上下文需求
 
 ### Todos工具系统 (`tools/todos.py`)
 - `create_todos()`: 创建任务列表，支持批量添加任务
@@ -46,7 +41,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `LLMSession`, `AgentConfig`, `ToolCall`
 - `function_to_tool_schema`, `python_type_to_schema`
 - `BaseLLMClient`, `OpenAIClient`, `OllamaClient`
-- `ToolMiddleware`, `TodosMiddleware`, `MiddlewareManager`
 - `create_todos`, `update_todos`, `query_todos`
 
 ## 常用命令
