@@ -1,6 +1,8 @@
 # HQ Agent SDK
 
-一个简洁而强大的Python SDK，专为LLM会话管理和工具调用而设计。HQ Agent SDK封装了OpenAI客户端，提供流式和非流式的LLM交互功能，支持函数工具调用和自动的工具执行循环。
+为了快速入手 Agent 制作，在简单场景里又不喜欢 Langchain 那种过于抽象的架构和封装。所以自制了一个简单框架。
+
+一个简洁的Python SDK，专为LLM会话管理和工具调用而设计。HQ Agent SDK封装了OpenAI客户端，提供流式和非流式的LLM交互功能，支持函数工具调用和自动的工具执行循环。
 
 ## 🚀 特性
 
@@ -138,6 +140,32 @@ ollama_session = LLMSession(
 )
 ```
 
+### 工具前后回调函数
+
+```python
+def tools_before_hook(tool_name: str, args: dict, session) -> dict:
+    """工具调用前的回调函数"""
+    print(f"- {tool_name}({','.join(f'{k}={v}' for k, v in args.items())})")
+    return args
+
+def tools_after_hook(result, tool_name: str, session):
+    """工具调用后的回调函数"""
+    print(f"⎿ {result}")
+    return result
+
+# 在LLMSession中使用回调函数
+session = LLMSession(
+    client=client,
+    tools=[get_weather, calculate],
+    config=AgentConfig(model="gpt-4", temperature=0.1),
+    before_tool_calling=[tools_before_hook],  # 前置回调函数列表
+    after_tool_calling=[tools_after_hook]     # 后置回调函数列表
+)
+
+# 这样每次工具调用时都会自动执行回调函数
+response = session.call("北京今天天气怎么样？然后帮我计算 15 * 23")
+```
+
 ### 自定义中间件
 
 ```python
@@ -268,6 +296,11 @@ rm -rf build/ dist/ *.egg-info/
 ```
 
 ## 📝 版本历史
+
+### v0.0.3
+- 简化了工具调用中间件的设计，改成输入函数列表
+BUGS:
+- 因为 Ollama 输出格式和 openAI不一样，处理起来还挺麻烦，没做好，暂时用 openAI接口客户端
 
 ### v0.0.2
 - **新增多LLM提供商支持**: OpenAI、Ollama统一接口

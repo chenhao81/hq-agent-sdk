@@ -21,7 +21,6 @@ import json
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Literal, Union
 
-from ..middleware import ToolMiddleware
 
 
 def _get_todos_dir() -> Path:
@@ -56,20 +55,16 @@ def _save_todos_file(session_id: str, todos: List[Dict[str, Any]]) -> None:
         json.dump(todos, f, ensure_ascii=False, indent=2)
 
 
-def create_todos(todo_items: List[str], session_id: str = None) -> Dict[str, Any]:
+def create_todos(todo_items: List[str], session_id: str = "default") -> Dict[str, Any]:
     """
     创建新的任务列表
     
     :param todo_items: 任务描述列表
-    :param session_id: 会话ID，由中间件自动注入
+    :param session_id: 会话ID，如果未提供则使用默认值
     :return: 包含success、msg、data字段的字典
     """
     if not session_id:
-        return {
-            "success": False,
-            "msg": "session_id 未提供，请确保使用了正确的中间件配置",
-            "data": None
-        }
+        session_id = "default"
     
     todos = []
     for i, content in enumerate(todo_items, 1):
@@ -87,21 +82,17 @@ def create_todos(todo_items: List[str], session_id: str = None) -> Dict[str, Any
     }
 
 
-def update_todos(task_id: str, status: Literal["pending", "in_progress", "completed"], session_id: str = None) -> Dict[str, Any]:
+def update_todos(task_id: str, status: Literal["pending", "in_progress", "completed"], session_id: str = "default") -> Dict[str, Any]:
     """
     更新指定任务的状态
     
     :param task_id: 任务ID
     :param status: 新的任务状态
-    :param session_id: 会话ID，由中间件自动注入
+    :param session_id: 会话ID，如果未提供则使用默认值
     :return: 包含success、msg、data字段的字典
     """
     if not session_id:
-        return {
-            "success": False,
-            "msg": "session_id 未提供，请确保使用了正确的中间件配置",
-            "data": None
-        }
+        session_id = "default"
     
     # 验证状态参数
     valid_statuses = ["pending", "in_progress", "completed"]
@@ -152,20 +143,16 @@ def update_todos(task_id: str, status: Literal["pending", "in_progress", "comple
     }
 
 
-def query_todos(status_filter: Optional[Literal["pending", "in_progress", "completed"]] = None, session_id: str = None) -> Dict[str, Any]:
+def query_todos(status_filter: Optional[Literal["pending", "in_progress", "completed"]] = None, session_id: str = "default") -> Dict[str, Any]:
     """
     查询任务列表
     
     :param status_filter: 可选的状态过滤器
-    :param session_id: 会话ID，由中间件自动注入
+    :param session_id: 会话ID，如果未提供则使用默认值
     :return: 包含success、msg、data字段的字典
     """
     if not session_id:
-        return {
-            "success": False,
-            "msg": "session_id 未提供，请确保使用了正确的中间件配置",
-            "data": None
-        }
+        session_id = "default"
     
     # 验证状态过滤器参数
     if status_filter is not None:
@@ -208,31 +195,25 @@ def query_todos(status_filter: Optional[Literal["pending", "in_progress", "compl
 
 
 
-class TodosMiddleware(ToolMiddleware):
-    """Todos工具专用中间件，自动注入session_id"""
-    
-    def before_tool_call(self, tool_name: str, args: Dict[str, Any], session) -> Dict[str, Any]:
-        """为todos相关工具自动注入session_id"""
-        if tool_name in ['create_todos', 'update_todos', 'query_todos']:
-            print(f"{tool_name}\n⎿ {args}")
+# Hook函数，用于轻量化的LLMSession before/after函数列表
+def todos_before_hook(tool_name: str, args: Dict[str, Any], session) -> Dict[str, Any]:
+    """为todos相关工具自动注入session_id"""
+    if tool_name in ['create_todos', 'update_todos', 'query_todos']:
+        args = args.copy()
+        args['session_id'] = session.session_id
+    return args
 
-            # 自动注入session_id
-            args = args.copy()  # 避免修改原始参数
-            args['session_id'] = session.session_id
-        return args
-    
-    def after_tool_call(self, result: Any, tool_name: str, session) -> Any:
-        if tool_name in ['create_todos', 'update_todos', 'query_todos']:
-            # 对于todos工具，打印格式化的结果
-            if isinstance(result, dict) and 'success' in result:
-                success_symbol = "✓" if result['success'] else "✗"
-                print(f"{tool_name} {success_symbol}\n⎿ {result['msg']}")
-                if result.get('data') and tool_name == 'query_todos':
-                    for todo in result['data']:
-                        status_symbol = {"completed": "✓", "in_progress": "●", "pending": "○"}[todo['status']]
-                        print(f"  {status_symbol} [{todo['id']}] {todo['content']}")
-            else:
-                print(f"{tool_name}\n⎿ {result}")
+
+def todos_after_hook(result: Any, tool_name: str, session) -> Any:
+    """对todos工具结果进行格式化打印"""
+    if tool_name in ['create_todos', 'update_todos', 'query_todos']:
+        if isinstance(result, dict) and 'success' in result:
+            success_symbol = "✓" if result['success'] else "✗"
+            print(f"{tool_name} {success_symbol}\n⎿ {result['msg']}")
+            if result.get('data') and tool_name == 'query_todos':
+                for todo in result['data']:
+                    status_symbol = {"completed": "✓", "in_progress": "●", "pending": "○"}[todo['status']]
+                    print(f"  {status_symbol} [{todo['id']}] {todo['content']}")
         else:
             print(f"{tool_name}\n⎿ {result}")
-        return result
+    return result

@@ -4,8 +4,6 @@ from typing import Dict, List, Callable, Optional, Any, Generator, Union
 from dataclasses import dataclass
 from .function_to_tool_schema import function_to_tool_schema
 from .llm_client import BaseLLMClient
-from .middleware import MiddlewareManager
-from .tools.todos import TodosMiddleware
 
 @dataclass
 class AgentConfig:
@@ -35,7 +33,8 @@ class LLMSession:
         config: AgentConfig = None,
         stream: bool = True,
         system_prompt: str = "你是一个AI助手",
-        auto_add_todos_middleware: bool = True
+        before_tool_calling: List[Callable] = None,
+        after_tool_calling: List[Callable] = None
     ):
         """
         初始化 LLMSession
@@ -46,7 +45,8 @@ class LLMSession:
             config: 配置参数
             stream: 是否使用流式输出
             system_prompt: 系统提示词
-            auto_add_todos_middleware: 是否自动添加todos中间件
+            before_tool_calling: 工具调用前执行的函数列表
+            after_tool_calling: 工具调用后执行的函数列表
         """
         self.client = client
         self.config = config or AgentConfig()
@@ -56,10 +56,9 @@ class LLMSession:
         # 生成唯一的session_id
         self.session_id = str(uuid.uuid4())
         
-        # 初始化中间件管理器
-        self.middleware_manager = MiddlewareManager()
-        if auto_add_todos_middleware:
-            self.middleware_manager.add_middleware(TodosMiddleware())
+        # 初始化前置和后置函数列表
+        self.before_tool_calling = before_tool_calling or []
+        self.after_tool_calling = after_tool_calling or []
         
         # 初始化消息历史
         self.messages = [{"role": "system", "content": system_prompt}]
@@ -114,18 +113,18 @@ class LLMSession:
             function_args = json.loads(tool_call.function.arguments)
             
             if function_name in self.tool_functions:
-                # 通过中间件处理参数
-                processed_args = self.middleware_manager.process_before_tool_call(
-                    function_name, function_args, self
-                )
+                # 执行前置函数列表
+                processed_args = function_args
+                for before_func in self.before_tool_calling:
+                    processed_args = before_func(function_name, processed_args, self)
                 
                 # 执行工具函数
                 result = self.tool_functions[function_name](**processed_args)
                 
-                # 通过中间件处理结果
-                processed_result = self.middleware_manager.process_after_tool_call(
-                    result, function_name, self
-                )
+                # 执行后置函数列表
+                processed_result = result
+                for after_func in self.after_tool_calling:
+                    processed_result = after_func(processed_result, function_name, self)
                 
                 return str(processed_result)
             else:
@@ -303,42 +302,19 @@ class LLMSession:
             
             # 检查是否有工具调用
             if hasattr(message, 'tool_calls') and message.tool_calls:
-                # 添加助手消息
-                assistant_message = {
-                    "role": "assistant",
-                    "content": message.content
-                }
-                
-                # 添加工具调用信息
-                assistant_message["tool_calls"] = []
+                # 转换为自定义ToolCall对象
+                tool_calls = []
                 for tc in message.tool_calls:
-                    assistant_message["tool_calls"].append({
-                        "id": tc.id,
-                        "type": tc.type,
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments
-                        }
-                    })
-                
-                self.messages.append(assistant_message)
-                
-                # 执行工具调用
-                for tc in message.tool_calls:
-                    # 创建兼容的ToolCall对象
                     tool_call_obj = ToolCall()
                     tool_call_obj.id = tc.id
                     tool_call_obj.function.name = tc.function.name
                     tool_call_obj.function.arguments = tc.function.arguments
-                    
-                    tool_result = self._execute_tool_call(tool_call_obj)
-                    self.messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": tool_result
-                    })
+                    tool_calls.append(tool_call_obj)
                 
-                continue  # 继续下一轮对话
+                # 使用统一的工具调用处理逻辑
+                tool_executed = self._handle_tool_calls(tool_calls, message.content)
+                if tool_executed:
+                    continue  # 继续下一轮对话
             else:
                 # 没有工具调用，添加最终消息并结束
                 self.messages.append({
